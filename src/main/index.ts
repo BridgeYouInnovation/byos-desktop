@@ -69,6 +69,16 @@ app.whenReady().then(async () => {
 
   createWindow()
 
+  // Check for updates on launch (packaged builds only; publishes to GitHub
+  // Releases). No-op if there is no update feed yet.
+  if (!isDev) {
+    import('electron-updater')
+      .then(({ autoUpdater }) => autoUpdater.checkForUpdatesAndNotify())
+      .catch(() => {
+        /* offline or no feed — ignore */
+      })
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

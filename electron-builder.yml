@@ -6,6 +6,14 @@ directories:
 files:
   - out/**/*
   - package.json
+# Native modules (better-sqlite3, @powersync/node) are unpacked from the asar so
+# their .node binaries load at runtime.
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+  - '**/node_modules/@powersync/**'
+  - '**/node_modules/@journeyapps/**'
+npmRebuild: true
+
 win:
   target:
     - nsis
@@ -14,4 +22,17 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-# macOS/Linux targets added when we expand beyond Windows-first.
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.business
+  # Unsigned local builds: skip notarization. Configure signing for distribution.
+  identity: null
+
+# Auto-update publishes to GitHub Releases (set GH_TOKEN in CI). The desktop repo
+# must be pushed to github.com/BridgeYouInnovation/byos-desktop for this to work.
+publish:
+  provider: github
+  owner: BridgeYouInnovation
+  repo: byos-desktop
