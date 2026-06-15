@@ -1,0 +1,17 @@
+appId: cm.bridgeyou.byos.desktop
+productName: BridgeYou Business OS
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+# macOS/Linux targets added when we expand beyond Windows-first.
