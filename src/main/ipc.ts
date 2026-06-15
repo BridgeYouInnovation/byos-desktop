@@ -45,8 +45,10 @@ export function registerIpc(): void {
   ipcMain.handle('auth:login', async (_e, identifier: string, password: string): Promise<LoginResult> =>
     login(identifier, password)
   )
-  ipcMain.handle('auth:selectBusiness', async (_e, tenantId: string): Promise<LoginResult> =>
-    selectBusiness(tenantId)
+  ipcMain.handle(
+    'auth:selectBusiness',
+    async (_e, identifier: string, password: string, tenantId: string): Promise<LoginResult> =>
+      selectBusiness(identifier, password, tenantId)
   )
   ipcMain.handle('auth:context', async (): Promise<TenantContextDTO | null> => getCurrentContext())
   ipcMain.handle('auth:logout', async (): Promise<void> => logout())

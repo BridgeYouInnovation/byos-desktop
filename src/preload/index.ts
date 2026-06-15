@@ -30,8 +30,8 @@ const api = {
   auth: {
     login: (identifier: string, password: string): Promise<LoginResult> =>
       ipcRenderer.invoke('auth:login', identifier, password),
-    selectBusiness: (tenantId: string): Promise<LoginResult> =>
-      ipcRenderer.invoke('auth:selectBusiness', tenantId),
+    selectBusiness: (identifier: string, password: string, tenantId: string): Promise<LoginResult> =>
+      ipcRenderer.invoke('auth:selectBusiness', identifier, password, tenantId),
     context: (): Promise<TenantContextDTO | null> => ipcRenderer.invoke('auth:context'),
     logout: (): Promise<void> => ipcRenderer.invoke('auth:logout')
   },

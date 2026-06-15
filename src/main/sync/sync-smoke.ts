@@ -1,4 +1,4 @@
-import { login } from '../repos/auth'
+import { login, selectBusiness } from '../repos/auth'
 import { getDashboardMetrics } from '../repos/dashboard'
 import { listRecords } from '../repos/records'
 import { listProducts } from '../repos/stock'
@@ -19,10 +19,17 @@ export async function runSyncSmoke(): Promise<void> {
   const password = process.env.BYOS_TEST_PASSWORD || 'Owner@12345'
 
   try {
-    const result = await login(email, password)
+    let result = await login(email, password)
+    if ('needsSelection' in result) {
+      out.picker = { businesses: result.businesses.map((b) => b.businessName) }
+      const pick = result.businesses[result.businesses.length - 1] // pick the LAST (e.g. church)
+      out.picked = pick.businessName
+      result = await selectBusiness(email, password, pick.id)
+      out.afterSelect = 'ok' in result ? { ok: result.ok, error: 'error' in result ? result.error : null } : result
+    }
     if (!('ok' in result) || !result.ok) {
       const err = 'needsSelection' in result ? 'needs_selection' : result.error
-      console.log('BYOS_SYNC_RESULT ' + JSON.stringify({ loginError: err }))
+      console.log('BYOS_SYNC_RESULT ' + JSON.stringify({ ...out, loginError: err }))
       return
     }
     const ctx = result.context

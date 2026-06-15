@@ -5,10 +5,6 @@ import { setSessionToken, getLoggedInUserId, setLoggedInUserId } from '../prefs'
 import { getTenantContext } from './tenant'
 import type { LoginResult, TenantContextDTO } from '@core/dto'
 
-// Credentials held between login() and selectBusiness() when an account has
-// multiple businesses (avoids a second password prompt). In-memory only.
-let pending: { identifier: string; password: string } | null = null
-
 type LocalAuth = {
   userId: string
   fullName: string
@@ -90,27 +86,25 @@ async function offlineLogin(identifier: string, password: string): Promise<Login
 // re-login when the backend is unreachable.
 export async function login(identifier: string, password: string): Promise<LoginResult> {
   const online = await requestOnlineLogin(identifier, password)
-  if ('token' in online) {
-    pending = null
-    return finishOnlineLogin(online)
-  }
-  if ('businesses' in online) {
-    pending = { identifier, password }
-    return { needsSelection: true, businesses: online.businesses }
-  }
+  if ('token' in online) return finishOnlineLogin(online)
+  if ('businesses' in online) return { needsSelection: true, businesses: online.businesses }
   if (online.error === 'offline') return offlineLogin(identifier, password)
   return { ok: false, error: online.error }
 }
 
-// Complete a multi-business login by choosing one (re-uses the held credentials).
-export async function selectBusiness(tenantId: string): Promise<LoginResult> {
-  if (!pending) return { ok: false, error: 'invalid' }
-  const online = await requestOnlineLogin(pending.identifier, pending.password, tenantId)
-  if ('token' in online) {
-    pending = null
-    return finishOnlineLogin(online)
-  }
-  return { ok: false, error: 'error' in online ? online.error : 'invalid' }
+// Complete a multi-business login by choosing one. The credentials are passed
+// back in from the renderer (which still holds them) rather than cached in the
+// main process — so the selection can't fail because of a lost in-memory state.
+export async function selectBusiness(
+  identifier: string,
+  password: string,
+  tenantId: string
+): Promise<LoginResult> {
+  const online = await requestOnlineLogin(identifier, password, tenantId)
+  if ('token' in online) return finishOnlineLogin(online)
+  if ('businesses' in online) return { ok: false, error: 'invalid_business' }
+  if (online.error === 'offline') return offlineLogin(identifier, password)
+  return { ok: false, error: online.error }
 }
 
 // Restore the session on boot (works offline from cached data). Resumes sync.

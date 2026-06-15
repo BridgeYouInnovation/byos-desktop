@@ -40,6 +40,10 @@ export default function Login({ online }: { online: boolean }) {
       en: 'Signed in offline, but no data has synced yet. Connect to the internet once.',
       fr: 'Connecté hors ligne, mais aucune donnée synchronisée. Connectez-vous à internet une fois.'
     }),
+    invalid_business: t({
+      en: 'That business could not be selected. Please try again.',
+      fr: "Cette entreprise n'a pas pu être sélectionnée. Veuillez réessayer."
+    }),
     missing: t({ en: 'Enter your email/phone and password.', fr: 'Saisissez votre e-mail/téléphone et mot de passe.' })
   }
 
@@ -72,7 +76,7 @@ export default function Login({ online }: { online: boolean }) {
     setError(undefined)
     setBusy(true)
     try {
-      handleResult(await window.byos.auth.selectBusiness(id))
+      handleResult(await window.byos.auth.selectBusiness(identifier, password, id))
     } finally {
       setBusy(false)
     }
