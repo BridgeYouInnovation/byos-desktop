@@ -1,25 +1,19 @@
 import { app, ipcMain } from 'electron'
-import { login, getCurrentUser, logout } from './repos/auth'
-import { getTenantContext } from './repos/tenant'
+import { login, getCurrentContext, logout } from './repos/auth'
 import { getDashboardMetrics } from './repos/dashboard'
 import { getWorkspaceRefs } from './repos/refs'
 import { createSale, createIncome, createExpense, listRecords, getRecordDetail } from './repos/records'
 import { listProducts, createProduct, adjustStock, listMovements } from './repos/stock'
 import { listContacts, createContact } from './repos/people'
 import { getReportSummary } from './repos/reports'
+import { getSyncStatus, triggerSync, type SyncStatusDTO } from './sync/powersync'
 import { getLang, setLang } from './prefs'
 import type { Lang } from '@core/i18n'
 import type { TenantContextDTO, LoginResult, DashboardMetrics, MutationResult } from '@core/dto'
 
-async function currentContext(): Promise<TenantContextDTO | null> {
-  const user = await getCurrentUser()
-  if (!user) return null
-  return getTenantContext(user)
-}
-
-// Resolve the active context or throw — used by every workspace-scoped handler.
+// Resolve the active workspace context or throw — used by workspace-scoped handlers.
 async function requireContext(): Promise<TenantContextDTO> {
-  const ctx = await currentContext()
+  const ctx = await getCurrentContext()
   if (!ctx) throw new Error('not_authenticated')
   return ctx
 }
@@ -28,12 +22,12 @@ async function requireContext(): Promise<TenantContextDTO> {
 // MutationResult instead of throwing across IPC.
 async function mutate(
   opts: { requireCreate?: boolean },
-  fn: (ctx: TenantContextDTO) => string
+  fn: (ctx: TenantContextDTO) => Promise<string>
 ): Promise<MutationResult> {
   try {
     const ctx = await requireContext()
     if (opts.requireCreate && !ctx.access.canCreate) return { ok: false, error: 'not_allowed' }
-    return { ok: true, id: fn(ctx) }
+    return { ok: true, id: await fn(ctx) }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'error' }
   }
@@ -43,21 +37,15 @@ export function registerIpc(): void {
   ipcMain.handle('app:getVersion', () => app.getVersion())
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  ipcMain.handle('auth:login', async (_e, identifier: string, password: string): Promise<LoginResult> => {
-    const result = await login(identifier, password)
-    if (!result || 'error' in result) return { ok: false, error: result?.error ?? 'invalid' }
-    const context = getTenantContext(result.user)
-    if (!context) return { ok: false, error: 'no_business' }
-    return { ok: true, context }
-  })
-  ipcMain.handle('auth:context', async (): Promise<TenantContextDTO | null> => currentContext())
-  ipcMain.handle('auth:logout', async (): Promise<void> => {
-    await logout()
-  })
+  ipcMain.handle('auth:login', async (_e, identifier: string, password: string): Promise<LoginResult> =>
+    login(identifier, password)
+  )
+  ipcMain.handle('auth:context', async (): Promise<TenantContextDTO | null> => getCurrentContext())
+  ipcMain.handle('auth:logout', async (): Promise<void> => logout())
 
   // ── Dashboard + reference data ──────────────────────────────────────────────
   ipcMain.handle('dashboard:metrics', async (): Promise<DashboardMetrics | null> => {
-    const ctx = await currentContext()
+    const ctx = await getCurrentContext()
     return ctx ? getDashboardMetrics(ctx.tenant.id) : null
   })
   ipcMain.handle('refs:get', async () => getWorkspaceRefs((await requireContext()).tenant.id))
@@ -85,8 +73,8 @@ export function registerIpc(): void {
     mutate({}, (ctx) => createProduct(ctx.tenant.id, ctx.user.id, input))
   )
   ipcMain.handle('stock:adjust', async (_e, input) =>
-    mutate({}, (ctx) => {
-      adjustStock(ctx.tenant.id, ctx.user.id, input)
+    mutate({}, async (ctx) => {
+      await adjustStock(ctx.tenant.id, ctx.user.id, input)
       return input.productId
     })
   )
@@ -106,6 +94,13 @@ export function registerIpc(): void {
   ipcMain.handle('reports:summary', async (_e, from: string, to: string) =>
     getReportSummary((await requireContext()).tenant.id, from, to)
   )
+
+  // ── Sync status ──────────────────────────────────────────────────────────────
+  ipcMain.handle('sync:status', async (): Promise<SyncStatusDTO> => getSyncStatus())
+  ipcMain.handle('sync:now', async (): Promise<SyncStatusDTO> => {
+    await triggerSync()
+    return getSyncStatus()
+  })
 
   // ── Prefs ───────────────────────────────────────────────────────────────────
   ipcMain.handle('prefs:getLang', (): Lang => getLang())

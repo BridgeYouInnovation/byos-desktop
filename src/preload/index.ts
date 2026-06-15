@@ -16,7 +16,8 @@ import type {
   StockMovementDTO,
   ContactDTO,
   CreateContactInput,
-  ReportSummary
+  ReportSummary,
+  SyncStatusDTO
 } from '@core/dto'
 
 // The single, audited surface the renderer is allowed to call into the main
@@ -60,6 +61,10 @@ const api = {
   reports: {
     summary: (from: string, to: string): Promise<ReportSummary> =>
       ipcRenderer.invoke('reports:summary', from, to)
+  },
+  sync: {
+    status: (): Promise<SyncStatusDTO> => ipcRenderer.invoke('sync:status'),
+    now: (): Promise<SyncStatusDTO> => ipcRenderer.invoke('sync:now')
   },
   prefs: {
     getLang: (): Promise<Lang> => ipcRenderer.invoke('prefs:getLang'),

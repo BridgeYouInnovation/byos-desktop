@@ -1,45 +1,46 @@
-import { getDb } from '../db/connection'
+import { getPowerSync } from '../sync/powersync'
 import type { WorkspaceRefs, RefItem, ProductRef, ContactDTO } from '@core/dto'
 
-// Reference data the record/stock forms need: default branch, categories,
-// accounts, contacts and sellable products — all from the local DB.
-export function getWorkspaceRefs(tenantId: string): WorkspaceRefs {
-  const db = getDb()
-  const branch = db
-    .prepare(`SELECT id FROM Branch WHERE tenantId = ? AND deletedAt IS NULL ORDER BY createdAt ASC LIMIT 1`)
-    .get(tenantId) as { id: string } | undefined
+// Reference data the record/stock forms need, from the local PowerSync DB.
+export async function getWorkspaceRefs(tenantId: string): Promise<WorkspaceRefs> {
+  const ps = getPowerSync()
+  const branch = await ps.getOptional<{ id: string }>(
+    `SELECT id FROM "Branch" WHERE tenantId = ? AND deletedAt IS NULL ORDER BY createdAt ASC LIMIT 1`,
+    [tenantId]
+  )
 
-  const cats = (kind: string): RefItem[] =>
-    db
-      .prepare(`SELECT id, name FROM RecordCategory WHERE tenantId = ? AND kind = ? ORDER BY name`)
-      .all(tenantId, kind) as RefItem[]
+  const cats = (kind: string): Promise<RefItem[]> =>
+    ps.getAll<RefItem>(
+      `SELECT id, name FROM "RecordCategory" WHERE tenantId = ? AND kind = ? ORDER BY name`,
+      [tenantId, kind]
+    )
 
-  return {
-    branchId: branch?.id ?? null,
-    incomeCategories: cats('income'),
-    expenseCategories: cats('expense'),
-    accounts: db
-      .prepare(`SELECT id, name FROM FinancialAccount WHERE tenantId = ? ORDER BY isDefault DESC, name`)
-      .all(tenantId) as RefItem[],
-    contacts: db
-      .prepare(
-        `SELECT id, contactType, name, phone, email, balanceMinor, notes
-           FROM Contact WHERE tenantId = ? AND deletedAt IS NULL ORDER BY name`
-      )
-      .all(tenantId) as ContactDTO[],
-    products: db
-      .prepare(
-        `SELECT id, name, sellingPriceMinor, unit
-           FROM Product WHERE tenantId = ? AND deletedAt IS NULL AND status = 'active' ORDER BY name`
-      )
-      .all(tenantId) as ProductRef[]
-  }
+  const [incomeCategories, expenseCategories, accounts, contacts, products] = await Promise.all([
+    cats('income'),
+    cats('expense'),
+    ps.getAll<RefItem>(
+      `SELECT id, name FROM "FinancialAccount" WHERE tenantId = ? ORDER BY isDefault DESC, name`,
+      [tenantId]
+    ),
+    ps.getAll<ContactDTO>(
+      `SELECT id, contactType, name, phone, email, balanceMinor, notes
+         FROM "Contact" WHERE tenantId = ? AND deletedAt IS NULL ORDER BY name`,
+      [tenantId]
+    ),
+    ps.getAll<ProductRef>(
+      `SELECT id, name, sellingPriceMinor, unit
+         FROM "Product" WHERE tenantId = ? AND deletedAt IS NULL AND status = 'active' ORDER BY name`,
+      [tenantId]
+    )
+  ])
+
+  return { branchId: branch?.id ?? null, incomeCategories, expenseCategories, accounts, contacts, products }
 }
 
-// Default branch id for a tenant (records/movements are scoped to it).
-export function defaultBranchId(tenantId: string): string | null {
-  const row = getDb()
-    .prepare(`SELECT id FROM Branch WHERE tenantId = ? AND deletedAt IS NULL ORDER BY createdAt ASC LIMIT 1`)
-    .get(tenantId) as { id: string } | undefined
+export async function defaultBranchId(tenantId: string): Promise<string | null> {
+  const row = await getPowerSync().getOptional<{ id: string }>(
+    `SELECT id FROM "Branch" WHERE tenantId = ? AND deletedAt IS NULL ORDER BY createdAt ASC LIMIT 1`,
+    [tenantId]
+  )
   return row?.id ?? null
 }

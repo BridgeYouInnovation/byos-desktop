@@ -1,4 +1,4 @@
-import { getDb } from '../db/connection'
+import { getPowerSync } from '../sync/powersync'
 import { getLang } from '../prefs'
 import { parsePermissions } from '@core/permissions'
 import { resolveAccess } from '@core/access'
@@ -22,7 +22,7 @@ type TenantRow = {
   subscriptionStatus: string
 }
 
-function tenantToDTO(t: TenantRow): TenantDTO {
+function tenantToDTO(t: TenantRow, status: string): TenantDTO {
   return {
     id: t.id,
     businessName: t.businessName,
@@ -37,100 +37,77 @@ function tenantToDTO(t: TenantRow): TenantDTO {
     themePrimary: t.themePrimary,
     themeSecondary: t.themeSecondary,
     receiptHeader: t.receiptHeader,
-    subscriptionStatus: t.subscriptionStatus
+    subscriptionStatus: status
   }
 }
 
-// Lazily transition subscription status by the calendar (the desktop equivalent
-// of refreshTenantSubscription — runs on workspace load). Admin-forced states
-// are preserved. Pure derivation lives in @core/subscription.
-function refreshSubscription(tenantId: string): void {
-  const db = getDb()
-  const tenant = db
-    .prepare('SELECT subscriptionStatus FROM Tenant WHERE id = ?')
-    .get(tenantId) as { subscriptionStatus: string } | undefined
-  if (!tenant || tenant.subscriptionStatus === 'suspended' || tenant.subscriptionStatus === 'cancelled') {
-    return
+// Effective subscription status, derived from the synced Subscription period
+// dates (display only — NOT persisted, so the server stays the source of truth
+// and we avoid sync write churn).
+async function effectiveStatus(tenant: TenantRow): Promise<string> {
+  if (tenant.subscriptionStatus === 'suspended' || tenant.subscriptionStatus === 'cancelled') {
+    return tenant.subscriptionStatus
   }
-  const sub = db
-    .prepare('SELECT * FROM Subscription WHERE tenantId = ? ORDER BY createdAt DESC LIMIT 1')
-    .get(tenantId) as
-    | { id: string; currentPeriodEnd: string | null; gracePeriodEnd: string | null }
-    | undefined
-  if (!sub?.currentPeriodEnd) return
-
+  const ps = getPowerSync()
+  const sub = await ps.getOptional<{ currentPeriodEnd: string | null; gracePeriodEnd: string | null }>(
+    'SELECT currentPeriodEnd, gracePeriodEnd FROM "Subscription" ORDER BY createdAt DESC LIMIT 1'
+  )
+  if (!sub?.currentPeriodEnd) return tenant.subscriptionStatus
   const next = deriveSubscriptionStatus({
     now: new Date(),
     periodEnd: new Date(sub.currentPeriodEnd),
     graceEnd: sub.gracePeriodEnd ? new Date(sub.gracePeriodEnd) : null
   })
-  if (next && next !== tenant.subscriptionStatus) {
-    const at = new Date().toISOString()
-    db.prepare('UPDATE Tenant SET subscriptionStatus = ?, updatedAt = ?, syncState = ? WHERE id = ?').run(
-      next,
-      at,
-      'dirty',
-      tenantId
-    )
-    db.prepare('UPDATE Subscription SET status = ?, updatedAt = ?, syncState = ? WHERE id = ?').run(
-      next,
-      at,
-      'dirty',
-      sub.id
-    )
-  }
+  return next ?? tenant.subscriptionStatus
 }
 
-// Single-tenant-per-device: resolve the one business this user operates here.
-export function getTenantContext(user: UserDTO): TenantContextDTO | null {
-  const db = getDb()
-  const membership = db
-    .prepare(
-      `SELECT tu.roleId
-         FROM TenantUser tu
-         JOIN Tenant t ON t.id = tu.tenantId
-        WHERE tu.userId = ? AND tu.status = 'active' AND t.deletedAt IS NULL
-        ORDER BY tu.createdAt ASC LIMIT 1`
-    )
-    .get(user.id) as { roleId: string | null } | undefined
+// Single-tenant-per-device: the local DB only holds this device's tenant rows
+// (PowerSync sync streams enforce isolation by the tenant_id JWT claim).
+export async function getTenantContext(userId: string): Promise<TenantContextDTO | null> {
+  const ps = getPowerSync()
+
+  const tenantRow = await ps.getOptional<TenantRow>('SELECT * FROM "Tenant" LIMIT 1')
+  if (!tenantRow) return null // not synced yet
+
+  const membership = await ps.getOptional<{ roleId: string | null }>(
+    `SELECT roleId FROM "TenantUser" WHERE userId = ? AND status = 'active' LIMIT 1`,
+    [userId]
+  )
   if (!membership) return null
 
-  const tenantRow = db
-    .prepare(
-      `SELECT t.* FROM Tenant t
-         JOIN TenantUser tu ON tu.tenantId = t.id
-        WHERE tu.userId = ? AND tu.status = 'active' AND t.deletedAt IS NULL
-        ORDER BY tu.createdAt ASC LIMIT 1`
-    )
-    .get(user.id) as TenantRow | undefined
-  if (!tenantRow) return null
-
-  refreshSubscription(tenantRow.id)
-  // Re-read status after a possible transition.
-  const status = (
-    db.prepare('SELECT subscriptionStatus FROM Tenant WHERE id = ?').get(tenantRow.id) as {
-      subscriptionStatus: string
-    }
-  ).subscriptionStatus
-  tenantRow.subscriptionStatus = status
+  const auth = await ps.getOptional<{
+    userId: string
+    fullName: string
+    email: string | null
+    phone: string | null
+  }>('SELECT userId, fullName, email, phone FROM local_auth WHERE userId = ?', [userId])
+  if (!auth) return null
+  const user: UserDTO = {
+    id: auth.userId,
+    fullName: auth.fullName,
+    email: auth.email,
+    phone: auth.phone,
+    isPlatformAdmin: false
+  }
 
   const role = membership.roleId
-    ? (db.prepare('SELECT id, name, isSystemRole, permissionsJson FROM Role WHERE id = ?').get(
-        membership.roleId
-      ) as { id: string; name: string; isSystemRole: number; permissionsJson: string } | undefined)
-    : undefined
+    ? await ps.getOptional<{ id: string; name: string; isSystemRole: number; permissionsJson: string }>(
+        'SELECT id, name, isSystemRole, permissionsJson FROM "Role" WHERE id = ?',
+        [membership.roleId]
+      )
+    : null
 
   const permissions = parsePermissions(role?.permissionsJson)
   const isOwner = role?.isSystemRole === 1 && role?.name === 'Business Owner'
   const modules = (
-    db.prepare('SELECT moduleKey FROM TenantModule WHERE tenantId = ? AND enabled = 1').all(
-      tenantRow.id
-    ) as { moduleKey: string }[]
+    await ps.getAll<{ moduleKey: string }>('SELECT moduleKey FROM "TenantModule" WHERE enabled = 1')
   ).map((m) => m.moduleKey)
+
+  const status = await effectiveStatus(tenantRow)
 
   return {
     user,
-    tenant: tenantToDTO(tenantRow),
+    tenant: tenantToDTO(tenantRow, status),
     role: role ? { id: role.id, name: role.name, isSystemRole: !!role.isSystemRole } : null,
     permissions,
     isOwner,

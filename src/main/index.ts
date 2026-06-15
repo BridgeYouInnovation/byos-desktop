@@ -1,14 +1,15 @@
 import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { registerIpc } from './ipc'
-import { getDb, closeDb } from './db/connection'
+import { getPowerSync, connectSync, closePowerSync } from './sync/powersync'
+import { getLoggedInUserId } from './prefs'
 
 const isDev = !app.isPackaged
-const SMOKE = !!process.env.BYOS_SMOKE
 const SYNC_SMOKE = !!process.env.BYOS_SYNC_SMOKE
 
-// Isolate smoke tests in a throwaway data dir so they never touch the user's DB.
-if (SMOKE || SYNC_SMOKE) {
+// Isolate the sync smoke test in a throwaway data dir so it never touches the
+// user's real database.
+if (SYNC_SMOKE) {
   app.setPath('userData', join(app.getPath('temp'), `byos-smoke-${process.pid}`))
 }
 
@@ -46,7 +47,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-  // Live PowerSync round-trip test — does NOT touch the better-sqlite3 layer.
+  // Live PowerSync round-trip test (isolated temp DB).
   if (SYNC_SMOKE) {
     const { runSyncSmoke } = await import('./sync/sync-smoke')
     await runSyncSmoke()
@@ -54,15 +55,16 @@ app.whenReady().then(async () => {
     return
   }
 
-  // Open + migrate + seed the local DB before the UI can query it.
-  getDb()
+  // Open the local PowerSync DB and register IPC before the UI queries it.
+  getPowerSync()
   registerIpc()
 
-  if (SMOKE) {
-    const { runSmoke } = await import('./smoke')
-    await runSmoke()
-    app.quit()
-    return
+  // If a user is already logged in (cached account), resume syncing in the
+  // background so their data is fresh when online and available when offline.
+  if (getLoggedInUserId()) {
+    connectSync().catch(() => {
+      /* offline — PowerSync retries automatically */
+    })
   }
 
   createWindow()
@@ -77,5 +79,5 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
-  closeDb()
+  closePowerSync()
 })

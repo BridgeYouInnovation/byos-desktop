@@ -7,8 +7,6 @@ import {
   Users,
   BarChart3,
   LogOut,
-  Wifi,
-  WifiOff,
   type LucideIcon
 } from 'lucide-react'
 import { getLexicon } from '@core/templates'
@@ -17,6 +15,7 @@ import { useI18n } from '../lib/i18n'
 import { useSession } from '../lib/session'
 import { Banner, Button, StatusBadge } from '../ui/ui'
 import { LanguageToggle } from '../components/LanguageToggle'
+import { SyncStatus } from '../components/SyncStatus'
 import Dashboard from './Dashboard'
 import Records from './Records'
 import Stock from './Stock'
@@ -25,7 +24,7 @@ import Reports from './Reports'
 
 type NavKey = 'dashboard' | 'records' | 'stock' | 'people' | 'reports'
 
-export default function Workspace({ online }: { online: boolean }) {
+export default function Workspace() {
   const { t, lang } = useI18n()
   const { context, logout } = useSession()
   const [active, setActive] = useState<NavKey>('dashboard')
@@ -100,15 +99,7 @@ export default function Workspace({ online }: { online: boolean }) {
         <header className="flex items-center justify-between gap-3 border-b border-line bg-white px-6 py-3">
           <h1 className="text-base font-semibold text-ink">{activeLabel}</h1>
           <div className="flex items-center gap-3">
-            <span
-              className={clsx(
-                'inline-flex items-center gap-1 text-xs font-medium',
-                online ? 'text-success' : 'text-muted'
-              )}
-            >
-              {online ? <Wifi size={13} /> : <WifiOff size={13} />}
-              {online ? t({ en: 'Online', fr: 'En ligne' }) : t({ en: 'Offline', fr: 'Hors ligne' })}
-            </span>
+            <SyncStatus />
             <StatusBadge status={tenant.subscriptionStatus} label={statusLabel} />
             <LanguageToggle />
             <Button variant="ghost" size="sm" onClick={logout}>

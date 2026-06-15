@@ -137,6 +137,16 @@ export type CreateSimpleInput = {
 
 export type MutationResult = { ok: true; id: string } | { ok: false; error: string }
 
+// ── Sync status (PowerSync) ───────────────────────────────────────────────────
+export type SyncStatusDTO = {
+  connected: boolean
+  connecting: boolean
+  lastSyncedAt: string | null // ISO
+  pending: number // unsynced local writes
+  downloading: boolean
+  uploading: boolean
+}
+
 // ── Stock ─────────────────────────────────────────────────────────────────────
 export type ProductDTO = {
   id: string

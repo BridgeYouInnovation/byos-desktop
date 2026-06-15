@@ -1,37 +1,30 @@
-import { getDb } from '../db/connection'
+import { getPowerSync } from '../sync/powersync'
 import { cuid } from '../id'
 import type { ContactDTO, CreateContactInput } from '@core/dto'
 
-export function listContacts(tenantId: string, type?: string): ContactDTO[] {
-  const db = getDb()
-  const clause = type ? 'AND contactType = @type' : ''
-  return db
-    .prepare(
-      `SELECT id, contactType, name, phone, email, balanceMinor, notes
-         FROM Contact WHERE tenantId = @tenantId AND deletedAt IS NULL ${clause}
-        ORDER BY name`
-    )
-    .all({ tenantId, type }) as ContactDTO[]
+export async function listContacts(tenantId: string, type?: string): Promise<ContactDTO[]> {
+  const params: unknown[] = [tenantId]
+  let clause = ''
+  if (type) {
+    clause = 'AND contactType = ?'
+    params.push(type)
+  }
+  return getPowerSync().getAll<ContactDTO>(
+    `SELECT id, contactType, name, phone, email, balanceMinor, notes
+       FROM "Contact" WHERE tenantId = ? AND deletedAt IS NULL ${clause}
+      ORDER BY name`,
+    params as never[]
+  )
 }
 
-export function createContact(tenantId: string, input: CreateContactInput): string {
-  const db = getDb()
+export async function createContact(tenantId: string, input: CreateContactInput): Promise<string> {
   if (!input.name?.trim()) throw new Error('Name is required.')
   const now = new Date().toISOString()
   const id = cuid()
-  db.prepare(
-    `INSERT INTO Contact (id, tenantId, contactType, name, phone, email, notes, balanceMinor, createdAt, updatedAt, syncState)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'dirty')`
-  ).run(
-    id,
-    tenantId,
-    input.contactType || 'customer',
-    input.name.trim(),
-    input.phone ?? null,
-    input.email ?? null,
-    input.notes ?? null,
-    now,
-    now
+  await getPowerSync().execute(
+    `INSERT INTO "Contact" (id, tenantId, contactType, name, phone, email, notes, balanceMinor, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    [id, tenantId, input.contactType || 'customer', input.name.trim(), input.phone ?? null, input.email ?? null, input.notes ?? null, now, now]
   )
   return id
 }

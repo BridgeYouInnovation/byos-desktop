@@ -1,72 +1,70 @@
-import { onlineLogin } from './online-auth'
-import { getPowerSync } from './powersync'
-import { cuid } from '../id'
+import { login } from '../repos/auth'
+import { getDashboardMetrics } from '../repos/dashboard'
+import { listRecords } from '../repos/records'
+import { listProducts } from '../repos/stock'
+import { listContacts } from '../repos/people'
+import { createIncome } from '../repos/records'
+import { getSyncStatus } from './powersync'
 
-// Dev-only end-to-end SYNC test (BYOS_SYNC_SMOKE=1) against the live web backend
-// + PowerSync Cloud + Supabase. Proves: online login → PowerSync connects →
-// initial sync pulls the tenant's rows down → a local insert uploads back to
-// Postgres. Run with an isolated temp userData (see index.ts).
+// Dev-only end-to-end test of the MIGRATED stack (BYOS_SYNC_SMOKE=1) against the
+// live web backend + PowerSync Cloud + Supabase. Exercises the real auth repo +
+// PowerSync-backed repos: online login → context → reads (dashboard/records/
+// products/contacts) → a write (createIncome) → upload drain.
 //
-// Requires: web dev server running (BYOS_BACKEND_URL, default localhost:3000),
-// Sync Streams deployed, and valid demo credentials.
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timeout: ${label}`)), ms))
-  ])
-}
-
+// Requires: web dev server (BYOS_BACKEND_URL, default localhost:3000), Sync
+// Streams deployed, and valid demo credentials.
 export async function runSyncSmoke(): Promise<void> {
   const out: Record<string, unknown> = {}
   const email = process.env.BYOS_TEST_EMAIL || 'owner@demo.cm'
   const password = process.env.BYOS_TEST_PASSWORD || 'Owner@12345'
 
   try {
-    const login = await onlineLogin(email, password)
-    if ('error' in login) {
-      console.log('BYOS_SYNC_RESULT ' + JSON.stringify({ loginError: login.error }))
+    const result = await login(email, password)
+    if (!result.ok) {
+      console.log('BYOS_SYNC_RESULT ' + JSON.stringify({ loginError: result.error }))
       return
     }
-    out.login = { user: login.user.fullName }
-
-    const ps = getPowerSync()
-    await withTimeout(ps.waitForFirstSync(), 60_000, 'first sync')
-    out.firstSyncDone = true
-
-    const count = async (t: string) =>
-      (await ps.get<{ c: number }>(`SELECT COUNT(*) AS c FROM "${t}"`)).c
-    out.pulled = {
-      Tenant: await count('Tenant'),
-      Contact: await count('Contact'),
-      Product: await count('Product'),
-      Record: await count('Record'),
-      RecordItem: await count('RecordItem')
+    const ctx = result.context
+    out.context = {
+      user: ctx.user.fullName,
+      business: ctx.tenant.businessName,
+      status: ctx.tenant.subscriptionStatus,
+      canCreate: ctx.access.canCreate,
+      isOwner: ctx.isOwner,
+      modules: ctx.modules
     }
 
-    const tenant = await ps.get<{ id: string; businessName: string }>(
-      'SELECT id, businessName FROM "Tenant" LIMIT 1'
-    )
-    out.tenant = tenant.businessName
+    const [metrics, records, products, contacts] = await Promise.all([
+      getDashboardMetrics(ctx.tenant.id),
+      listRecords(ctx.tenant.id),
+      listProducts(ctx.tenant.id),
+      listContacts(ctx.tenant.id)
+    ])
+    out.reads = {
+      monthInMinor: metrics.monthInMinor,
+      records: records.length,
+      products: products.length,
+      contacts: contacts.length,
+      sampleProduct: products[0] && { name: products[0].name, qty: products[0].quantity }
+    }
 
-    // Insert a record locally → PowerSync should upload it to Postgres.
-    const id = cuid()
-    const num = `INC-SYNC-${Date.now().toString().slice(-6)}`
-    await ps.execute(
-      `INSERT INTO "Record" (id, tenantId, kind, recordNumber, recordDate, subtotalMinor, amountMinor, currency, paymentStatus, approvalStatus, description, isVoid, createdAt, updatedAt)
-       VALUES (?, ?, 'income', ?, ?, 0, 12345, 'XAF', 'paid', 'none', 'sync smoke test', 0, ?, ?)`,
-      [id, tenant.id, num, new Date().toISOString(), new Date().toISOString(), new Date().toISOString()]
-    )
-    out.inserted = { id, num }
+    // Write through the migrated repo → PowerSync local + upload queue.
+    const created = await createIncome(ctx.tenant.id, ctx.user.id, {
+      amountMinor: 9876,
+      description: 'migration smoke test'
+    })
+    const after = await listRecords(ctx.tenant.id, { kind: 'income' })
+    out.write = { created: !!created, incomeCountAfter: after.length }
 
-    // Wait for the upload queue to drain.
+    // Wait for upload to drain.
     let pending = 1
     for (let i = 0; i < 30 && pending > 0; i++) {
-      const batch = await ps.getCrudBatch()
-      pending = batch ? batch.crud.length : 0
+      pending = (await getSyncStatus()).pending
       if (pending === 0) break
       await new Promise((r) => setTimeout(r, 1000))
     }
-    out.uploadQueueDrained = pending === 0
+    const status = await getSyncStatus()
+    out.sync = { connected: status.connected, lastSyncedAt: status.lastSyncedAt, pending: status.pending }
   } catch (e) {
     out.error = e instanceof Error ? e.message : String(e)
   }

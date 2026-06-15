@@ -3,11 +3,13 @@ import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import type { Lang } from '@core/i18n'
 
-// Tiny JSON prefs file in the app-data dir. Holds the persisted session token
-// (so the user stays logged in across restarts — offline) and the language
-// choice. (Phase 5: move the session token to the OS keychain / encrypt.)
+// Tiny JSON prefs file in the app-data dir. Holds the persisted desktop-session
+// token (the sync bearer), the id of the currently logged-in user (so the user
+// stays logged in across restarts, online or offline), and the language choice.
+// (Phase 5: move the token to the OS keychain / encrypt.)
 type Prefs = {
   sessionToken?: string
+  loggedInUserId?: string
   lang?: Lang
 }
 
@@ -35,6 +37,16 @@ export function setSessionToken(token: string | null): void {
   const p = read()
   if (token) p.sessionToken = token
   else delete p.sessionToken
+  write(p)
+}
+
+export function getLoggedInUserId(): string | null {
+  return read().loggedInUserId ?? null
+}
+export function setLoggedInUserId(userId: string | null): void {
+  const p = read()
+  if (userId) p.loggedInUserId = userId
+  else delete p.loggedInUserId
   write(p)
 }
 

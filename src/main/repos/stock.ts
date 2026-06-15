@@ -1,109 +1,100 @@
-import { getDb } from '../db/connection'
+import { getPowerSync } from '../sync/powersync'
 import { cuid } from '../id'
 import { defaultBranchId } from './refs'
 import type { ProductDTO, CreateProductInput, StockMovementDTO, AdjustStockInput } from '@core/dto'
 
-export function listProducts(tenantId: string): ProductDTO[] {
-  return getDb()
-    .prepare(
-      `SELECT p.id, p.name, cat.name AS categoryName, p.unit, p.costPriceMinor, p.sellingPriceMinor,
-              p.reorderLevel, p.trackStock, p.status,
-              COALESCE((SELECT SUM(b.quantity) FROM InventoryBalance b WHERE b.productId = p.id), 0) AS quantity
-         FROM Product p
-         LEFT JOIN RecordCategory cat ON cat.id = p.categoryId
-        WHERE p.tenantId = ? AND p.deletedAt IS NULL
-        ORDER BY p.name`
-    )
-    .all(tenantId)
-    .map((r) => ({ ...(r as ProductDTO), trackStock: !!(r as { trackStock: number }).trackStock })) as ProductDTO[]
+export async function listProducts(tenantId: string): Promise<ProductDTO[]> {
+  const rows = await getPowerSync().getAll<Omit<ProductDTO, 'trackStock'> & { trackStock: number }>(
+    `SELECT p.id, p.name, cat.name AS categoryName, p.unit, p.costPriceMinor, p.sellingPriceMinor,
+            p.reorderLevel, p.trackStock, p.status,
+            COALESCE((SELECT SUM(b.quantity) FROM "InventoryBalance" b WHERE b.productId = p.id), 0) AS quantity
+       FROM "Product" p
+       LEFT JOIN "RecordCategory" cat ON cat.id = p.categoryId
+      WHERE p.tenantId = ? AND p.deletedAt IS NULL
+      ORDER BY p.name`,
+    [tenantId]
+  )
+  return rows.map((r) => ({ ...r, trackStock: !!r.trackStock }))
 }
 
-export function createProduct(tenantId: string, userId: string, input: CreateProductInput): string {
-  const db = getDb()
+export async function createProduct(tenantId: string, userId: string, input: CreateProductInput): Promise<string> {
   if (!input.name?.trim()) throw new Error('Product name is required.')
-  const branchId = defaultBranchId(tenantId)
+  const ps = getPowerSync()
+  const branchId = await defaultBranchId(tenantId)
   const now = new Date().toISOString()
   const id = cuid()
   const trackStock = input.trackStock === false ? 0 : 1
+  const opening = Math.max(0, input.openingQty ?? 0)
 
-  return db.transaction(() => {
-    db.prepare(
-      `INSERT INTO Product (id, tenantId, categoryId, name, unit, costPriceMinor, sellingPriceMinor,
-                            reorderLevel, trackStock, status, createdAt, updatedAt, syncState)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, 'dirty')`
-    ).run(
-      id,
-      tenantId,
-      input.categoryId ?? null,
-      input.name.trim(),
-      input.unit || 'unit',
-      input.costPriceMinor ?? null,
-      input.sellingPriceMinor ?? null,
-      input.reorderLevel ?? 0,
-      trackStock,
-      now,
-      now
+  await ps.writeTransaction(async (tx) => {
+    await tx.execute(
+      `INSERT INTO "Product" (id, tenantId, categoryId, name, unit, costPriceMinor, sellingPriceMinor,
+                              reorderLevel, trackStock, status, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+      [id, tenantId, input.categoryId ?? null, input.name.trim(), input.unit || 'unit', input.costPriceMinor ?? null, input.sellingPriceMinor ?? null, input.reorderLevel ?? 0, trackStock, now, now]
     )
-
-    const opening = Math.max(0, input.openingQty ?? 0)
     if (trackStock && opening > 0 && branchId) {
-      db.prepare(
-        `INSERT INTO InventoryMovement (id, tenantId, productId, branchId, movementType, quantity, unitCostMinor, reason, movementDate, createdById, createdAt, syncState)
-         VALUES (?, ?, ?, ?, 'opening', ?, ?, 'Opening stock', ?, ?, ?, 'dirty')`
-      ).run(cuid(), tenantId, id, branchId, opening, input.costPriceMinor ?? null, now, userId, now)
-      db.prepare(
-        'INSERT INTO InventoryBalance (id, tenantId, productId, branchId, quantity, syncState) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(cuid(), tenantId, id, branchId, opening, 'dirty')
+      await tx.execute(
+        `INSERT INTO "InventoryMovement" (id, tenantId, productId, branchId, movementType, quantity, unitCostMinor, reason, movementDate, createdById, createdAt)
+         VALUES (?, ?, ?, ?, 'opening', ?, ?, 'Opening stock', ?, ?, ?)`,
+        [cuid(), tenantId, id, branchId, opening, input.costPriceMinor ?? null, now, userId, now]
+      )
+      await tx.execute(
+        'INSERT INTO "InventoryBalance" (id, tenantId, productId, branchId, quantity) VALUES (?, ?, ?, ?, ?)',
+        [cuid(), tenantId, id, branchId, opening]
+      )
     }
-    return id
-  })()
+  })
+  return id
 }
 
-// Adjust stock by appending a movement and recomputing the balance. Positive
-// movements (stock_in) add; the rest subtract.
-export function adjustStock(tenantId: string, userId: string, input: AdjustStockInput): void {
-  const db = getDb()
+// Append a movement + recompute the balance. Positive (stock_in) adds; rest subtract.
+export async function adjustStock(tenantId: string, userId: string, input: AdjustStockInput): Promise<void> {
   const qty = Math.abs(input.quantity)
   if (!(qty > 0)) throw new Error('Quantity must be greater than zero.')
-  const branchId = defaultBranchId(tenantId)
+  const ps = getPowerSync()
+  const branchId = await defaultBranchId(tenantId)
   if (!branchId) throw new Error('No branch configured.')
   const signed = input.movementType === 'stock_in' ? qty : -qty
   const now = new Date().toISOString()
 
-  db.transaction(() => {
-    db.prepare(
-      `INSERT INTO InventoryMovement (id, tenantId, productId, branchId, movementType, quantity, reason, movementDate, createdById, createdAt, syncState)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dirty')`
-    ).run(cuid(), tenantId, input.productId, branchId, input.movementType, qty, input.reason ?? null, now, userId, now)
-
-    const bal = db
-      .prepare('SELECT id, quantity FROM InventoryBalance WHERE productId = ? AND branchId = ?')
-      .get(input.productId, branchId) as { id: string; quantity: number } | undefined
-    if (bal) {
-      db.prepare('UPDATE InventoryBalance SET quantity = ?, syncState = ? WHERE id = ?').run(
-        bal.quantity + signed,
-        'dirty',
-        bal.id
+  await ps.writeTransaction(async (tx) => {
+    await tx.execute(
+      `INSERT INTO "InventoryMovement" (id, tenantId, productId, branchId, movementType, quantity, reason, movementDate, createdById, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [cuid(), tenantId, input.productId, branchId, input.movementType, qty, input.reason ?? null, now, userId, now]
+    )
+    const bal = (
+      await tx.getAll<{ id: string; quantity: number }>(
+        'SELECT id, quantity FROM "InventoryBalance" WHERE productId = ? AND branchId = ?',
+        [input.productId, branchId]
       )
+    )[0]
+    if (bal) {
+      await tx.execute('UPDATE "InventoryBalance" SET quantity = ? WHERE id = ?', [bal.quantity + signed, bal.id])
     } else {
-      db.prepare(
-        'INSERT INTO InventoryBalance (id, tenantId, productId, branchId, quantity, syncState) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(cuid(), tenantId, input.productId, branchId, signed, 'dirty')
+      await tx.execute(
+        'INSERT INTO "InventoryBalance" (id, tenantId, productId, branchId, quantity) VALUES (?, ?, ?, ?, ?)',
+        [cuid(), tenantId, input.productId, branchId, signed]
+      )
     }
-  })()
+  })
 }
 
-export function listMovements(tenantId: string, productId?: string): StockMovementDTO[] {
-  const db = getDb()
-  const clause = productId ? 'AND m.productId = @productId' : ''
-  return db
-    .prepare(
-      `SELECT m.id, p.name AS productName, m.movementType, m.quantity, m.reason, m.movementDate
-         FROM InventoryMovement m
-         JOIN Product p ON p.id = m.productId
-        WHERE m.tenantId = @tenantId ${clause}
-        ORDER BY m.movementDate DESC, m.createdAt DESC
-        LIMIT 200`
-    )
-    .all({ tenantId, productId }) as StockMovementDTO[]
+export async function listMovements(tenantId: string, productId?: string): Promise<StockMovementDTO[]> {
+  const params: unknown[] = [tenantId]
+  let clause = ''
+  if (productId) {
+    clause = 'AND m.productId = ?'
+    params.push(productId)
+  }
+  return getPowerSync().getAll<StockMovementDTO>(
+    `SELECT m.id, p.name AS productName, m.movementType, m.quantity, m.reason, m.movementDate
+       FROM "InventoryMovement" m
+       JOIN "Product" p ON p.id = m.productId
+      WHERE m.tenantId = ? ${clause}
+      ORDER BY m.movementDate DESC, m.createdAt DESC
+      LIMIT 200`,
+    params as never[]
+  )
 }

@@ -28,7 +28,7 @@ function Root() {
       <div className="grid h-full place-items-center text-sm text-muted">Loading…</div>
     )
   }
-  return context ? <Workspace online={online} /> : <Login online={online} />
+  return context ? <Workspace /> : <Login online={online} />
 }
 
 export default function App() {

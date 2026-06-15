@@ -25,6 +25,18 @@ export default function Login({ online }: { online: boolean }) {
       en: 'No business is set up on this device for that account.',
       fr: "Aucune entreprise n'est configurée sur cet appareil pour ce compte."
     }),
+    offline: t({
+      en: 'No internet, and this account has never logged in on this device. Connect once to get started.',
+      fr: "Pas d'internet, et ce compte ne s'est jamais connecté sur cet appareil. Connectez-vous une fois pour commencer."
+    }),
+    sync_failed: t({
+      en: 'Signed in, but your data could not sync. Check your connection and try again.',
+      fr: 'Connecté, mais vos données n\'ont pas pu se synchroniser. Vérifiez votre connexion et réessayez.'
+    }),
+    no_data: t({
+      en: 'Signed in offline, but no data has synced yet. Connect to the internet once.',
+      fr: 'Connecté hors ligne, mais aucune donnée synchronisée. Connectez-vous à internet une fois.'
+    }),
     missing: t({ en: 'Enter your email/phone and password.', fr: 'Saisissez votre e-mail/téléphone et mot de passe.' })
   }
 
