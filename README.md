@@ -4,7 +4,11 @@ Offline-first desktop build of BYOS. **Login + the software only** (no marketing
 daily workflow (sales/income/expense, stock, contacts, dashboard, reports, receipts) with no internet,
 and syncs to the central Supabase via **PowerSync** when online.
 
-See `../DESKTOP_APP_HANDOFF.md` (the brief) and `../DESKTOP_BUILD_PLAN.md` (locked decisions + architecture).
+See the brief + plan in the BYOS docs folder: `~/Documents/BridgeYou Business OS (BYOS)/DESKTOP_APP_HANDOFF.md`
+and `DESKTOP_BUILD_PLAN.md`. PowerSync provisioning: `POWERSYNC_SETUP.md` (this repo).
+
+> This repo lives at `~/Documents/byos-desktop` (moved out of the BYOS folder — native
+> module builds and electron-builder can't handle the parentheses in `(BYOS)`).
 
 ## Stack
 

@@ -5,10 +5,10 @@ import { getDb, closeDb } from './db/connection'
 
 const isDev = !app.isPackaged
 const SMOKE = !!process.env.BYOS_SMOKE
+const SYNC_SMOKE = !!process.env.BYOS_SYNC_SMOKE
 
-// Isolate the smoke test in a throwaway data dir so it always seeds fresh and
-// never touches the user's real database.
-if (SMOKE) {
+// Isolate smoke tests in a throwaway data dir so they never touch the user's DB.
+if (SMOKE || SYNC_SMOKE) {
   app.setPath('userData', join(app.getPath('temp'), `byos-smoke-${process.pid}`))
 }
 
@@ -46,6 +46,14 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  // Live PowerSync round-trip test — does NOT touch the better-sqlite3 layer.
+  if (SYNC_SMOKE) {
+    const { runSyncSmoke } = await import('./sync/sync-smoke')
+    await runSyncSmoke()
+    app.quit()
+    return
+  }
+
   // Open + migrate + seed the local DB before the UI can query it.
   getDb()
   registerIpc()

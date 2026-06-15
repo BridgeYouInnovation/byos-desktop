@@ -66,35 +66,69 @@ Instance → **Client Auth**:
 > (`SYNC_JWT_PRIVATE_KEY_B64`, kid `byos-sync-a1c86961`). To rotate, run
 > `node scripts/gen-sync-key.mjs` in `web/`, update `.env`, and re-paste the new JWKS.
 
-## 4. Sync Rules
+## 4. Sync Streams
 
-Instance → **Sync Rules** → paste, then **Deploy**. Each device syncs only its
-own tenant's rows, keyed off the `tenant_id` JWT claim:
+This instance uses PowerSync's newer **Sync Streams** model (`config.edition: 3`),
+not the legacy `bucket_definitions:` sync rules. Instance → **Sync Streams** →
+paste, then **Deploy**. Each device syncs only its own tenant's rows, keyed off
+the `tenant_id` JWT claim via `auth.parameter('tenant_id')`:
 
 ```yaml
-bucket_definitions:
-  tenant_data:
-    parameters: SELECT request.jwt() ->> 'tenant_id' AS tenant_id
-    data:
-      - SELECT * FROM "Tenant"            WHERE id = bucket.tenant_id
-      - SELECT * FROM "TenantUser"        WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "Role"              WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "Branch"            WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "RecordCategory"    WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "FinancialAccount"  WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "TenantModule"      WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "Contact"           WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "Product"           WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "InventoryBalance"  WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "InventoryMovement" WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "Record"            WHERE "tenantId" = bucket.tenant_id
-      - SELECT * FROM "RecordItem"        WHERE "recordId" IN (SELECT id FROM "Record" WHERE "tenantId" = bucket.tenant_id)
-      - SELECT * FROM "Subscription"      WHERE "tenantId" = bucket.tenant_id
+config:
+  edition: 3
+
+streams:
+  tenant:
+    auto_subscribe: true
+    query: SELECT * FROM "Tenant" WHERE id = auth.parameter('tenant_id')
+  tenant_users:
+    auto_subscribe: true
+    query: SELECT * FROM "TenantUser" WHERE "tenantId" = auth.parameter('tenant_id')
+  roles:
+    auto_subscribe: true
+    query: SELECT * FROM "Role" WHERE "tenantId" = auth.parameter('tenant_id')
+  branches:
+    auto_subscribe: true
+    query: SELECT * FROM "Branch" WHERE "tenantId" = auth.parameter('tenant_id')
+  record_categories:
+    auto_subscribe: true
+    query: SELECT * FROM "RecordCategory" WHERE "tenantId" = auth.parameter('tenant_id')
+  financial_accounts:
+    auto_subscribe: true
+    query: SELECT * FROM "FinancialAccount" WHERE "tenantId" = auth.parameter('tenant_id')
+  tenant_modules:
+    auto_subscribe: true
+    query: SELECT * FROM "TenantModule" WHERE "tenantId" = auth.parameter('tenant_id')
+  contacts:
+    auto_subscribe: true
+    query: SELECT * FROM "Contact" WHERE "tenantId" = auth.parameter('tenant_id')
+  products:
+    auto_subscribe: true
+    query: SELECT * FROM "Product" WHERE "tenantId" = auth.parameter('tenant_id')
+  inventory_balances:
+    auto_subscribe: true
+    query: SELECT * FROM "InventoryBalance" WHERE "tenantId" = auth.parameter('tenant_id')
+  inventory_movements:
+    auto_subscribe: true
+    query: SELECT * FROM "InventoryMovement" WHERE "tenantId" = auth.parameter('tenant_id')
+  records:
+    auto_subscribe: true
+    query: SELECT * FROM "Record" WHERE "tenantId" = auth.parameter('tenant_id')
+  record_items:
+    auto_subscribe: true
+    query: |
+      SELECT * FROM "RecordItem"
+      WHERE "recordId" IN (SELECT id FROM "Record" WHERE "tenantId" = auth.parameter('tenant_id'))
+  subscriptions:
+    auto_subscribe: true
+    query: SELECT * FROM "Subscription" WHERE "tenantId" = auth.parameter('tenant_id')
 ```
 
-> Note: Postgres table names are PascalCase (Prisma default), so they're quoted.
-> The `User` row for login isn't synced here (the device already has it from the
-> online login response); we can add a `global` bucket for templates later.
+> Postgres table/column names are PascalCase/camelCase (Prisma default), so they're
+> quoted. `auth.parameter('tenant_id')` reads the signed `tenant_id` claim — a
+> device can't request another tenant's data. The `User` row isn't synced (the
+> device gets its profile + bcrypt hash from the online-login response, stored
+> in a local-only table for offline re-login).
 
 ## 5. Wire the env
 
