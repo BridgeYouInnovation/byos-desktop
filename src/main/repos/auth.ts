@@ -39,9 +39,15 @@ async function waitForTenantData(timeoutMs: number): Promise<boolean> {
 async function finishOnlineLogin(res: OnlineLoginScoped): Promise<LoginResult> {
   const ps = getPowerSync()
 
-  // Switching accounts on this device → wipe the previous tenant's synced data.
+  // Wipe the previously-synced data if it belongs to a different user OR a
+  // different business than the one chosen. Comparing against the actual synced
+  // Tenant row (not just local_auth) self-heals a half-switched state where
+  // local_auth was updated but the old tenant's rows are still present.
   const existing = await ps.getOptional<{ userId: string }>('SELECT userId FROM local_auth LIMIT 1')
-  if (existing && existing.userId !== res.user.id) {
+  const syncedTenant = await ps.getOptional<{ id: string }>('SELECT id FROM "Tenant" LIMIT 1')
+  const userChanged = !!existing && existing.userId !== res.user.id
+  const tenantMismatch = !!syncedTenant && syncedTenant.id !== res.tenant.id
+  if (userChanged || tenantMismatch) {
     await clearSyncedData()
   }
 
