@@ -37,9 +37,17 @@ export type TenantContextDTO = {
   modules: string[] // enabled module keys
 }
 
+export type BusinessChoice = {
+  id: string
+  businessName: string
+  slug: string
+  industryType: string
+}
+
 export type LoginResult =
   | { ok: true; context: TenantContextDTO }
   | { ok: false; error: string }
+  | { needsSelection: true; businesses: BusinessChoice[] }
 
 export type DashboardMetrics = {
   todayInMinor: number
@@ -136,6 +144,26 @@ export type CreateSimpleInput = {
 }
 
 export type MutationResult = { ok: true; id: string } | { ok: false; error: string }
+
+// ── Subscription + team (Settings / Subscription / Users screens) ─────────────
+export type SubscriptionInfo = {
+  planName: string
+  priceMinor: number
+  currency: string
+  status: string
+  currentPeriodStart: string | null
+  currentPeriodEnd: string | null
+  gracePeriodEnd: string | null
+} | null
+
+export type RoleInfo = {
+  id: string
+  name: string
+  description: string | null
+  isSystemRole: boolean
+  permissionCount: number
+  memberCount: number
+}
 
 // ── Sync status (PowerSync) ───────────────────────────────────────────────────
 export type SyncStatusDTO = {

@@ -20,8 +20,9 @@ export async function runSyncSmoke(): Promise<void> {
 
   try {
     const result = await login(email, password)
-    if (!result.ok) {
-      console.log('BYOS_SYNC_RESULT ' + JSON.stringify({ loginError: result.error }))
+    if (!('ok' in result) || !result.ok) {
+      const err = 'needsSelection' in result ? 'needs_selection' : result.error
+      console.log('BYOS_SYNC_RESULT ' + JSON.stringify({ loginError: err }))
       return
     }
     const ctx = result.context

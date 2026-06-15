@@ -18,6 +18,8 @@ export default function Stock() {
   const [loading, setLoading] = useState(true)
   const lex = context ? getLexicon(context.tenant.industryType, lang) : null
   const cur = context!.tenant.currency
+  // Some industries (e.g. a restaurant menu) don't track stock quantities.
+  const tracks = lex?.tracksStock !== false
 
   async function reload() {
     setLoading(true)
@@ -55,7 +57,7 @@ export default function Stock() {
                   <th>{t({ en: 'Category', fr: 'Catégorie' })}</th>
                   <th className="text-right">{t({ en: 'Cost', fr: 'Coût' })}</th>
                   <th className="text-right">{t({ en: 'Price', fr: 'Prix' })}</th>
-                  <th className="text-right">{t({ en: 'In stock', fr: 'En stock' })}</th>
+                  {tracks && <th className="text-right">{t({ en: 'In stock', fr: 'En stock' })}</th>}
                   <th></th>
                 </tr>
               </thead>
@@ -72,16 +74,18 @@ export default function Stock() {
                       <td className="text-right">
                         {p.sellingPriceMinor != null ? formatMoney(p.sellingPriceMinor, cur) : '—'}
                       </td>
-                      <td className={clsx('text-right font-semibold', low ? 'text-danger' : 'text-ink')}>
-                        {p.trackStock ? `${p.quantity} ${p.unit}` : '—'}
-                        {low && (
-                          <span className="ml-1 text-xs font-normal text-danger">
-                            {t({ en: '(low)', fr: '(faible)' })}
-                          </span>
-                        )}
-                      </td>
+                      {tracks && (
+                        <td className={clsx('text-right font-semibold', low ? 'text-danger' : 'text-ink')}>
+                          {p.trackStock ? `${p.quantity} ${p.unit}` : '—'}
+                          {low && (
+                            <span className="ml-1 text-xs font-normal text-danger">
+                              {t({ en: '(low)', fr: '(faible)' })}
+                            </span>
+                          )}
+                        </td>
+                      )}
                       <td className="text-right">
-                        {p.trackStock && (
+                        {tracks && p.trackStock && (
                           <Button size="sm" variant="ghost" onClick={() => setAdjust(p)}>
                             {t({ en: 'Adjust', fr: 'Ajuster' })}
                           </Button>

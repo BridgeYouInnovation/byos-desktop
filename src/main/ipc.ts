@@ -1,11 +1,12 @@
-import { app, ipcMain } from 'electron'
-import { login, getCurrentContext, logout } from './repos/auth'
+import { app, ipcMain, shell } from 'electron'
+import { login, selectBusiness, getCurrentContext, logout } from './repos/auth'
 import { getDashboardMetrics } from './repos/dashboard'
 import { getWorkspaceRefs } from './repos/refs'
 import { createSale, createIncome, createExpense, listRecords, getRecordDetail } from './repos/records'
 import { listProducts, createProduct, adjustStock, listMovements } from './repos/stock'
 import { listContacts, createContact } from './repos/people'
 import { getReportSummary } from './repos/reports'
+import { getSubscriptionInfo, listRoles } from './repos/billing'
 import { getSyncStatus, triggerSync, type SyncStatusDTO } from './sync/powersync'
 import { getLang, setLang } from './prefs'
 import type { Lang } from '@core/i18n'
@@ -35,10 +36,17 @@ async function mutate(
 
 export function registerIpc(): void {
   ipcMain.handle('app:getVersion', () => app.getVersion())
+  // Open admin features (billing, team, customization) in the system browser.
+  ipcMain.handle('app:openExternal', (_e, url: string) => {
+    if (/^https?:\/\//.test(url)) shell.openExternal(url)
+  })
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   ipcMain.handle('auth:login', async (_e, identifier: string, password: string): Promise<LoginResult> =>
     login(identifier, password)
+  )
+  ipcMain.handle('auth:selectBusiness', async (_e, tenantId: string): Promise<LoginResult> =>
+    selectBusiness(tenantId)
   )
   ipcMain.handle('auth:context', async (): Promise<TenantContextDTO | null> => getCurrentContext())
   ipcMain.handle('auth:logout', async (): Promise<void> => logout())
@@ -94,6 +102,10 @@ export function registerIpc(): void {
   ipcMain.handle('reports:summary', async (_e, from: string, to: string) =>
     getReportSummary((await requireContext()).tenant.id, from, to)
   )
+
+  // ── Subscription + team ──────────────────────────────────────────────────────
+  ipcMain.handle('billing:info', async () => getSubscriptionInfo((await requireContext()).tenant.id))
+  ipcMain.handle('team:roles', async () => listRoles((await requireContext()).tenant.id))
 
   // ── Sync status ──────────────────────────────────────────────────────────────
   ipcMain.handle('sync:status', async (): Promise<SyncStatusDTO> => getSyncStatus())

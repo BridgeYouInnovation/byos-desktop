@@ -1,9 +1,13 @@
 import bcrypt from 'bcryptjs'
 import { getPowerSync, connectSync, disconnectSync, clearSyncedData } from '../sync/powersync'
-import { requestOnlineLogin, type OnlineLoginOk } from '../sync/online-auth'
+import { requestOnlineLogin, type OnlineLoginScoped } from '../sync/online-auth'
 import { setSessionToken, getLoggedInUserId, setLoggedInUserId } from '../prefs'
 import { getTenantContext } from './tenant'
 import type { LoginResult, TenantContextDTO } from '@core/dto'
+
+// Credentials held between login() and selectBusiness() when an account has
+// multiple businesses (avoids a second password prompt). In-memory only.
+let pending: { identifier: string; password: string } | null = null
 
 type LocalAuth = {
   userId: string
@@ -32,7 +36,7 @@ async function waitForTenantData(timeoutMs: number): Promise<boolean> {
 // Online login: store the session token + cache the account locally (incl. bcrypt
 // hash for offline re-login), connect sync, wait for the first pull, then build
 // the workspace context from the synced data.
-async function finishOnlineLogin(res: OnlineLoginOk): Promise<LoginResult> {
+async function finishOnlineLogin(res: OnlineLoginScoped): Promise<LoginResult> {
   const ps = getPowerSync()
 
   // Switching accounts on this device → wipe the previous tenant's synced data.
@@ -75,13 +79,32 @@ async function offlineLogin(identifier: string, password: string): Promise<Login
   return ctx ? { ok: true, context: ctx } : { ok: false, error: 'no_data' }
 }
 
-// Login: try online (real verification + fresh sync token), fall back to offline
+// Login: try online (real verification + fresh sync token). When the account has
+// multiple businesses, returns the list for the picker. Falls back to offline
 // re-login when the backend is unreachable.
 export async function login(identifier: string, password: string): Promise<LoginResult> {
   const online = await requestOnlineLogin(identifier, password)
-  if ('token' in online) return finishOnlineLogin(online)
+  if ('token' in online) {
+    pending = null
+    return finishOnlineLogin(online)
+  }
+  if ('businesses' in online) {
+    pending = { identifier, password }
+    return { needsSelection: true, businesses: online.businesses }
+  }
   if (online.error === 'offline') return offlineLogin(identifier, password)
   return { ok: false, error: online.error }
+}
+
+// Complete a multi-business login by choosing one (re-uses the held credentials).
+export async function selectBusiness(tenantId: string): Promise<LoginResult> {
+  if (!pending) return { ok: false, error: 'invalid' }
+  const online = await requestOnlineLogin(pending.identifier, pending.password, tenantId)
+  if ('token' in online) {
+    pending = null
+    return finishOnlineLogin(online)
+  }
+  return { ok: false, error: 'error' in online ? online.error : 'invalid' }
 }
 
 // Restore the session on boot (works offline from cached data). Resumes sync.

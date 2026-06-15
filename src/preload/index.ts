@@ -17,16 +17,21 @@ import type {
   ContactDTO,
   CreateContactInput,
   ReportSummary,
-  SyncStatusDTO
+  SyncStatusDTO,
+  SubscriptionInfo,
+  RoleInfo
 } from '@core/dto'
 
 // The single, audited surface the renderer is allowed to call into the main
 // process. Everything is async (IPC). The data layer (SQLite) lives in main.
 const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('app:openExternal', url),
   auth: {
     login: (identifier: string, password: string): Promise<LoginResult> =>
       ipcRenderer.invoke('auth:login', identifier, password),
+    selectBusiness: (tenantId: string): Promise<LoginResult> =>
+      ipcRenderer.invoke('auth:selectBusiness', tenantId),
     context: (): Promise<TenantContextDTO | null> => ipcRenderer.invoke('auth:context'),
     logout: (): Promise<void> => ipcRenderer.invoke('auth:logout')
   },
@@ -61,6 +66,12 @@ const api = {
   reports: {
     summary: (from: string, to: string): Promise<ReportSummary> =>
       ipcRenderer.invoke('reports:summary', from, to)
+  },
+  billing: {
+    info: (): Promise<SubscriptionInfo> => ipcRenderer.invoke('billing:info')
+  },
+  team: {
+    roles: (): Promise<RoleInfo[]> => ipcRenderer.invoke('team:roles')
   },
   sync: {
     status: (): Promise<SyncStatusDTO> => ipcRenderer.invoke('sync:status'),
