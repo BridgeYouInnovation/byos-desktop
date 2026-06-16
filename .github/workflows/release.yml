@@ -10,6 +10,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# electron-builder creates a GitHub Release for the tag.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
