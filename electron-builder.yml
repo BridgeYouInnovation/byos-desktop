@@ -1,5 +1,5 @@
 appId: cm.bridgeyou.byos.desktop
-productName: BridgeYou Business OS
+productName: BYOS
 directories:
   output: dist
   buildResources: build

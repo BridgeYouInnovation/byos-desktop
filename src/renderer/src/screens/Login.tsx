@@ -95,7 +95,7 @@ export default function Login({ online }: { online: boolean }) {
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-tenant-primary text-white font-bold">
               B
             </div>
-            <span className="font-bold text-ink">BridgeYou Business OS</span>
+            <span className="font-bold text-ink">BYOS</span>
           </div>
           <LanguageToggle />
         </div>

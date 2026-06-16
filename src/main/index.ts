@@ -21,7 +21,7 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
-    title: 'BridgeYou Business OS',
+    title: 'BYOS',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
