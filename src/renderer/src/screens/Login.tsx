@@ -44,6 +44,7 @@ export default function Login({ online }: { online: boolean }) {
       en: 'That business could not be selected. Please try again.',
       fr: "Cette entreprise n'a pas pu être sélectionnée. Veuillez réessayer."
     }),
+    generic: t({ en: 'Something went wrong. Please try again.', fr: 'Une erreur est survenue. Veuillez réessayer.' }),
     missing: t({ en: 'Enter your email/phone and password.', fr: 'Saisissez votre e-mail/téléphone et mot de passe.' })
   }
 
@@ -67,6 +68,8 @@ export default function Login({ online }: { online: boolean }) {
     setBusy(true)
     try {
       handleResult(await window.byos.auth.login(identifier, password))
+    } catch {
+      setError(messages.generic)
     } finally {
       setBusy(false)
     }
@@ -77,6 +80,8 @@ export default function Login({ online }: { online: boolean }) {
     setBusy(true)
     try {
       handleResult(await window.byos.auth.selectBusiness(identifier, password, id))
+    } catch {
+      setError(messages.generic)
     } finally {
       setBusy(false)
     }

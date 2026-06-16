@@ -6,12 +6,12 @@ directories:
 files:
   - out/**/*
   - package.json
-# Native modules (better-sqlite3, @powersync/node) are unpacked from the asar so
-# their .node binaries load at runtime.
-asarUnpack:
-  - '**/node_modules/better-sqlite3/**'
-  - '**/node_modules/@powersync/**'
-  - '**/node_modules/@journeyapps/**'
+# Ship unpacked (no asar). @powersync/node loads its native extension via a raw
+# path (path.resolve(__dirname, '../lib/...')) in a worker thread, which can't be
+# dlopen'd from inside an asar archive. Disabling asar keeps every file a real
+# path so better-sqlite3 (.node) and the powersync extension (.dll/.dylib/.so)
+# load correctly. Worth the slightly larger install for a native-heavy app.
+asar: false
 npmRebuild: true
 
 win:
